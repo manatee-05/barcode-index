@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  barcode-indexer:
+    build: .
+    container_name: barcode-indexer-container
+    ports:
+      - "8081:8081"
+    volumes:
+      - barcode-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  barcode-data:
+    driver: local
