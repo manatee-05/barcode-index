@@ -270,12 +270,25 @@ if (btnScan) {
                 appState.codeReader = new ZXing.BrowserMultiFormatReader();
             }
             
-            const cameras = await appState.codeReader.listVideoInputDevices();
+            // Get devices natively
+            let devices = await navigator.mediaDevices.enumerateDevices();
+            let videoDevices = devices.filter(d => d.kind === 'videoinput');
+            
+            // If labels are empty (Safari), we need to request permission first
+            if (videoDevices.length > 0 && !videoDevices[0].label) {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                stream.getTracks().forEach(track => track.stop());
+                await new Promise(r => setTimeout(r, 250)); // Wait for hardware to release lock
+                
+                devices = await navigator.mediaDevices.enumerateDevices();
+                videoDevices = devices.filter(d => d.kind === 'videoinput');
+            }
+            
             cameraSelect.innerHTML = '';
             
-            if (cameras && cameras.length > 0) {
-                let defaultDeviceId = cameras[0].deviceId;
-                cameras.forEach((camera, index) => {
+            if (videoDevices && videoDevices.length > 0) {
+                let defaultDeviceId = videoDevices[0].deviceId;
+                videoDevices.forEach((camera, index) => {
                     const opt = document.createElement('option');
                     opt.value = camera.deviceId;
                     // Prefer back/environment camera if available
@@ -287,7 +300,6 @@ if (btnScan) {
                     cameraSelect.appendChild(opt);
                 });
                 
-                // If the user already selected one, keep it; otherwise use default
                 if (!cameraSelect.value) {
                     cameraSelect.value = defaultDeviceId;
                 }
@@ -317,9 +329,27 @@ async function startScanner() {
     }
 
     try {
-        await appState.codeReader.decodeFromVideoDevice(
-            cameraId,
-            'scanner-viewfinder',
+        const videoElement = document.getElementById('scanner-viewfinder');
+        
+        // Request the stream natively. Fallback to non-strict if OverconstrainedError occurs.
+        let stream;
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({
+                video: { deviceId: { exact: cameraId } }
+            });
+        } catch (e) {
+            console.warn("Strict deviceId failed, falling back to ideal:", e);
+            stream = await navigator.mediaDevices.getUserMedia({
+                video: { deviceId: cameraId }
+            });
+        }
+        
+        videoElement.srcObject = stream;
+        appState.activeStream = stream; // Store so we can stop it later
+        
+        // Use decodeFromVideoElement to read from the already active video element
+        appState.codeReader.decodeFromVideoElement(
+            videoElement,
             async (result, err) => {
                 if (result) {
                     playBeep();
@@ -328,15 +358,11 @@ async function startScanner() {
                     scannerModal.classList.add('hidden');
                     await handleScannedCode(result.getText());
                 }
-                if (err && !(err instanceof ZXing.NotFoundException)) {
-                    // Ignore NotFoundException, it just means no barcode in the current frame
-                    console.error("ZXing Error: ", err);
-                }
             }
         );
     } catch (err) {
         console.error('Scanner start failed:', err);
-        showToast('Camera access failed. Ensure you are using HTTPS and granted permissions.', 'error');
+        showToast('Camera access failed. Check browser permissions.', 'error');
         scannerModal.classList.add('hidden');
     }
 }
@@ -344,6 +370,10 @@ async function startScanner() {
 async function stopScanner() {
     if (appState.codeReader) {
         appState.codeReader.reset();
+    }
+    if (appState.activeStream) {
+        appState.activeStream.getTracks().forEach(track => track.stop());
+        appState.activeStream = null;
     }
 }
 
