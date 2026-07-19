@@ -331,7 +331,6 @@ async function startScanner() {
     try {
         const videoElement = document.getElementById('scanner-viewfinder');
         
-        // Request the stream natively. Fallback to non-strict if OverconstrainedError occurs.
         let stream;
         try {
             stream = await navigator.mediaDevices.getUserMedia({
@@ -345,21 +344,37 @@ async function startScanner() {
         }
         
         videoElement.srcObject = stream;
-        appState.activeStream = stream; // Store so we can stop it later
+        appState.activeStream = stream;
+        appState.isScanning = true;
         
-        // Use decodeFromVideoElement to read from the already active video element
-        appState.codeReader.decodeFromVideoElement(
-            videoElement,
-            async (result, err) => {
+        // Ensure video is playing before starting the loop
+        videoElement.addEventListener('playing', () => {
+            scanLoop();
+        }, { once: true });
+
+        async function scanLoop() {
+            if (!appState.isScanning) return;
+
+            try {
+                const result = await appState.codeReader.decodeFromVideoElement(videoElement);
                 if (result) {
                     playBeep();
                     showToast(`Scanned Code: ${result.getText()}`, 'success');
                     await stopScanner();
                     scannerModal.classList.add('hidden');
                     await handleScannedCode(result.getText());
+                    return; // End loop on success
                 }
+            } catch (err) {
+                // Ignore NotFoundException, just keep scanning
             }
-        );
+            
+            // Loop on the next animation frame
+            if (appState.isScanning) {
+                requestAnimationFrame(scanLoop);
+            }
+        }
+        
     } catch (err) {
         console.error('Scanner start failed:', err);
         showToast('Camera access failed. Check browser permissions.', 'error');
@@ -368,6 +383,8 @@ async function startScanner() {
 }
 
 async function stopScanner() {
+    appState.isScanning = false;
+    
     if (appState.codeReader) {
         appState.codeReader.reset();
     }
