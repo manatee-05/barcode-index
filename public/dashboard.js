@@ -322,11 +322,7 @@ async function startScanner() {
                 qrbox: (w, h) => {
                     return { width: Math.min(w * 0.85, 300), height: Math.min(h * 0.45, 140) };
                 },
-                videoConstraints: {
-                    deviceId: { exact: cameraId },
-                    width: { min: 640, ideal: 1280 },
-                    height: { min: 480, ideal: 720 }
-                },
+                // Removed strict width/height and exact deviceId constraints to support Mobile Safari
                 formatsToSupport: formats
             },
             async (decodedText) => {
