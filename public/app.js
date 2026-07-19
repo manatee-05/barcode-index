@@ -1,5 +1,5 @@
 /* --------------------------------------------------------------------------
-   AEROSCAN WEB APP LOGIC
+   AEROSCAN WEB APP LOGIC - MOBILE & LIGHT MODE
    -------------------------------------------------------------------------- */
 
 // Application State
@@ -31,7 +31,10 @@ const recordSearch = document.getElementById('record-search');
 const btnAddManual = document.getElementById('btn-add-manual');
 const recordsList = document.getElementById('records-list');
 
-const editorEmptyState = document.getElementById('editor-empty-state');
+// Slide-Up Bottom Sheet Elements
+const editorSheet = document.getElementById('editor-sheet');
+const editorSheetBackdrop = document.getElementById('editor-sheet-backdrop');
+const btnCloseEditor = document.getElementById('btn-close-editor');
 const recordEditorForm = document.getElementById('record-editor');
 const editorTitleLabel = document.getElementById('editor-title-label');
 const editorStatusBadge = document.getElementById('editor-status-badge');
@@ -41,6 +44,7 @@ const editorNotes = document.getElementById('editor-notes');
 const btnDeleteRecord = document.getElementById('btn-delete-record');
 const btnCancelEdit = document.getElementById('btn-cancel-edit');
 
+// Camera Scanner Elements
 const scannerModal = document.getElementById('scanner-modal');
 const btnCloseScanner = document.getElementById('btn-close-scanner');
 const cameraSelect = document.getElementById('camera-select');
@@ -58,22 +62,26 @@ function showToast(message, type = 'info') {
     clearTimeout(toastTimeout);
     toastTimeout = setTimeout(() => {
         toast.classList.add('hidden');
-    }, 3500);
+    }, 3000);
 }
 
 /* ==========================================================================
-   VIEW ROUTING
+   VIEW ROUTING & ENFORCEMENT
    ========================================================================== */
 function updateView() {
     if (appState.token && appState.indexName) {
+        // Logged In: Show dashboard, load records, block access screen
         authScreen.classList.add('hidden');
         dashboardScreen.classList.remove('hidden');
         displayIndexName.textContent = appState.indexName;
         loadRecords();
-        resetEditor();
+        closeEditorSheet();
     } else {
+        // Logged Out/No selection: Strict selection gate. Hide everything else
         authScreen.classList.remove('hidden');
         dashboardScreen.classList.add('hidden');
+        closeEditorSheet();
+        
         loginNameInput.value = '';
         loginPasscodeInput.value = '';
         createNameInput.value = '';
@@ -86,7 +94,7 @@ function login(token, indexName) {
     localStorage.setItem('aeroscan_index_name', indexName);
     appState.token = token;
     appState.indexName = indexName;
-    showToast(`Successfully unlocked index: ${indexName}`, 'success');
+    showToast(`Unlocked index: ${indexName}`, 'success');
     updateView();
 }
 
@@ -97,7 +105,7 @@ function logout() {
     appState.indexName = '';
     appState.records = [];
     appState.selectedBarcode = null;
-    showToast('Index locked. Session closed.', 'info');
+    showToast('Index locked.', 'info');
     updateView();
 }
 
@@ -106,7 +114,7 @@ function getAuthHeader() {
 }
 
 /* ==========================================================================
-   AUTH TABS & AUTOCOMPLETE
+   AUTH TABS & SUGGESTION POP-UPS
    ========================================================================== */
 tabLogin.addEventListener('click', () => {
     tabLogin.classList.add('active');
@@ -122,7 +130,7 @@ tabCreate.addEventListener('click', () => {
     formLogin.classList.add('hidden');
 });
 
-// Debounced Index Search
+// Debounced Auto-complete
 let searchTimeout = null;
 loginNameInput.addEventListener('input', () => {
     clearTimeout(searchTimeout);
@@ -162,7 +170,6 @@ loginNameInput.addEventListener('input', () => {
     }, 200);
 });
 
-// Close autocomplete when clicking outside
 document.addEventListener('click', (e) => {
     if (e.target !== loginNameInput && e.target !== loginSuggestions) {
         loginSuggestions.classList.add('hidden');
@@ -170,7 +177,7 @@ document.addEventListener('click', (e) => {
 });
 
 /* ==========================================================================
-   AUTH FORMS SUBMIT HANDLERS
+   AUTH FORMS ROUTING
    ========================================================================== */
 formLogin.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -187,11 +194,11 @@ formLogin.addEventListener('submit', async (e) => {
         if (res.ok && data.success) {
             login(data.token, data.indexName);
         } else {
-            showToast(data.error || 'Authentication failed', 'error');
+            showToast(data.error || 'Incorrect index name or passcode', 'error');
         }
     } catch (err) {
         console.error('Login error:', err);
-        showToast('Network error connecting to index backend.', 'error');
+        showToast('Connection failed.', 'error');
     }
 });
 
@@ -214,14 +221,14 @@ formCreate.addEventListener('submit', async (e) => {
         }
     } catch (err) {
         console.error('Creation error:', err);
-        showToast('Network error creating index.', 'error');
+        showToast('Index database setup failed.', 'error');
     }
 });
 
 btnLogout.addEventListener('click', logout);
 
 /* ==========================================================================
-   RECORDS DIRECTORY (LEFT PANEL)
+   RECORDS LOADING & SEARCH
    ========================================================================== */
 async function loadRecords(searchQuery = '') {
     try {
@@ -243,14 +250,14 @@ async function loadRecords(searchQuery = '') {
         renderRecordsList();
     } catch (err) {
         console.error('Failed to load records:', err);
-        showToast('Error Loading index records.', 'error');
+        showToast('Error loading record directory.', 'error');
     }
 }
 
 function renderRecordsList() {
     recordsList.innerHTML = '';
     if (appState.records.length === 0) {
-        recordsList.innerHTML = '<div class="list-empty">No matching records found.</div>';
+        recordsList.innerHTML = '<div class="list-empty">No indexed records found.</div>';
         return;
     }
 
@@ -261,17 +268,9 @@ function renderRecordsList() {
             card.classList.add('active');
         }
         
-        // Format preview text
         const notesPreview = record.notes 
-            ? record.notes.substring(0, 50) + (record.notes.length > 50 ? '...' : '')
-            : 'No notes added yet.';
-            
-        const updatedDate = new Date(record.updated_at).toLocaleDateString(undefined, {
-            month: 'short',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-        });
+            ? record.notes.substring(0, 75) + (record.notes.length > 75 ? '...' : '')
+            : 'No description text.';
 
         card.innerHTML = `
             <div class="record-card-header">
@@ -279,7 +278,6 @@ function renderRecordsList() {
                 <span class="record-card-barcode">${escapeHTML(record.barcode)}</span>
             </div>
             <div class="record-card-preview">${escapeHTML(notesPreview)}</div>
-            <div class="record-card-date">Modified: ${updatedDate}</div>
         `;
         
         card.addEventListener('click', () => selectRecord(record));
@@ -287,47 +285,56 @@ function renderRecordsList() {
     });
 }
 
-// Debounced record search
 let recordSearchTimeout = null;
 recordSearch.addEventListener('input', () => {
     clearTimeout(recordSearchTimeout);
     recordSearchTimeout = setTimeout(() => {
         loadRecords(recordSearch.value);
-    }, 250);
+    }, 200);
 });
 
 /* ==========================================================================
-   RECORD EDITOR / VIEWER (RIGHT PANEL)
+   SLIDE-UP SHEET TRIGGERS
    ========================================================================== */
-function resetEditor() {
-    appState.selectedBarcode = null;
-    editorEmptyState.classList.remove('hidden');
-    recordEditorForm.classList.add('hidden');
+function openEditorSheet() {
+    editorSheet.classList.remove('hidden');
+    editorSheetBackdrop.classList.remove('hidden');
+    document.body.style.overflow = 'hidden'; // Stop background list scrolling
 }
+
+function closeEditorSheet() {
+    editorSheet.classList.add('hidden');
+    editorSheetBackdrop.classList.add('hidden');
+    document.body.style.overflow = '';
+    
+    // Clear list selection visuals
+    appState.selectedBarcode = null;
+    document.querySelectorAll('.record-card').forEach(c => c.classList.remove('active'));
+}
+
+btnCloseEditor.addEventListener('click', closeEditorSheet);
+btnCancelEdit.addEventListener('click', closeEditorSheet);
+editorSheetBackdrop.addEventListener('click', closeEditorSheet);
 
 function selectRecord(record) {
     appState.selectedBarcode = record.barcode;
     
-    // UI toggle
-    editorEmptyState.classList.add('hidden');
-    recordEditorForm.classList.remove('hidden');
-    
-    // Fill fields
     editorTitleLabel.textContent = 'Edit Record';
     editorStatusBadge.textContent = 'Saved';
     editorStatusBadge.className = 'badge saved';
     
     editorBarcode.value = record.barcode;
-    editorBarcode.readOnly = true; // Barcodes are keys; must be deleted/re-created to alter key
+    editorBarcode.readOnly = true; // Unique key is read-only
     editorTitle.value = record.title;
     editorNotes.value = record.notes || '';
     
     btnDeleteRecord.classList.remove('hidden');
-    
-    // Refresh active state styling in list
+    openEditorSheet();
+
+    // Highlight selected list card
     document.querySelectorAll('.record-card').forEach(card => {
-        const bCode = card.querySelector('.record-card-barcode').textContent;
-        if (bCode === record.barcode) {
+        const barcodeText = card.querySelector('.record-card-barcode').textContent;
+        if (barcodeText === record.barcode) {
             card.classList.add('active');
         } else {
             card.classList.remove('active');
@@ -338,10 +345,7 @@ function selectRecord(record) {
 function startNewRecord(prefilledBarcode = '') {
     appState.selectedBarcode = null;
     
-    editorEmptyState.classList.add('hidden');
-    recordEditorForm.classList.remove('hidden');
-    
-    editorTitleLabel.textContent = 'Create New Record';
+    editorTitleLabel.textContent = 'Create Record';
     editorStatusBadge.textContent = 'Draft';
     editorStatusBadge.className = 'badge';
     
@@ -351,18 +355,21 @@ function startNewRecord(prefilledBarcode = '') {
     editorNotes.value = '';
     
     btnDeleteRecord.classList.add('hidden');
+    openEditorSheet();
     
-    // Clear list selection
+    // Clear list selection highlights
     document.querySelectorAll('.record-card').forEach(c => c.classList.remove('active'));
     
-    if (prefilledBarcode) {
-        editorTitle.focus();
-    } else {
-        editorBarcode.focus();
-    }
+    // Focus appropriate input field
+    setTimeout(() => {
+        if (prefilledBarcode) {
+            editorTitle.focus();
+        } else {
+            editorBarcode.focus();
+        }
+    }, 300);
 }
 
-// Track unsaved modifications
 function markRecordEdited() {
     if (appState.selectedBarcode && editorStatusBadge.textContent === 'Saved') {
         editorStatusBadge.textContent = 'Edited';
@@ -372,11 +379,9 @@ function markRecordEdited() {
 editorTitle.addEventListener('input', markRecordEdited);
 editorNotes.addEventListener('input', markRecordEdited);
 
-btnCancelEdit.addEventListener('click', resetEditor);
-
 btnAddManual.addEventListener('click', () => startNewRecord(''));
 
-// Save Record submission
+// Save Record handler
 recordEditorForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const barcode = editorBarcode.value.trim();
@@ -395,23 +400,23 @@ recordEditorForm.addEventListener('submit', async (e) => {
         
         const data = await res.json();
         if (res.ok && data.success) {
-            showToast('Record saved successfully.', 'success');
+            showToast('Record saved.', 'success');
             await loadRecords(recordSearch.value);
-            selectRecord(data.record);
+            closeEditorSheet();
         } else {
             showToast(data.error || 'Failed to save record', 'error');
         }
     } catch (err) {
-        console.error('Saving record failed:', err);
-        showToast('Network error saving record.', 'error');
+        console.error('Save failed:', err);
+        showToast('Network error.', 'error');
     }
 });
 
-// Delete Record
+// Delete Record handler
 btnDeleteRecord.addEventListener('click', async () => {
     if (!appState.selectedBarcode) return;
     
-    const confirmDelete = confirm(`Are you sure you want to delete this record (${appState.selectedBarcode})?`);
+    const confirmDelete = confirm(`Delete this record (${appState.selectedBarcode})?`);
     if (!confirmDelete) return;
 
     try {
@@ -422,25 +427,24 @@ btnDeleteRecord.addEventListener('click', async () => {
         const data = await res.json();
         if (res.ok && data.success) {
             showToast('Record deleted.', 'success');
-            resetEditor();
+            closeEditorSheet();
             loadRecords(recordSearch.value);
         } else {
             showToast(data.error || 'Failed to delete record', 'error');
         }
     } catch (err) {
-        console.error('Deletion error:', err);
-        showToast('Network error deleting record.', 'error');
+        console.error('Delete error:', err);
+        showToast('Network error.', 'error');
     }
 });
 
 /* ==========================================================================
-   CAMERA BARCODE/QR SCANNER INTEGRATION
+   CAMERA BARCODE SCANNING
    ========================================================================== */
 btnScan.addEventListener('click', async () => {
     scannerModal.classList.remove('hidden');
-    cameraSelect.innerHTML = '<option value="">Loading camera permissions...</option>';
+    cameraSelect.innerHTML = '<option value="">Checking camera...</option>';
     
-    // Invalidate state & populate camera sources list
     try {
         const cameras = await Html5Qrcode.getCameras();
         cameraSelect.innerHTML = '';
@@ -448,67 +452,81 @@ btnScan.addEventListener('click', async () => {
             cameras.forEach((camera, index) => {
                 const opt = document.createElement('option');
                 opt.value = camera.id;
-                // Prefer rear camera on smartphones
+                // Auto-select rear camera
                 if (camera.label.toLowerCase().includes('back') || camera.label.toLowerCase().includes('environment')) {
                     opt.selected = true;
                 }
                 opt.textContent = camera.label || `Camera ${index + 1}`;
                 cameraSelect.appendChild(opt);
             });
-            
-            // Start the default/selected camera feed
             startScanner();
         } else {
             cameraSelect.innerHTML = '<option value="">No cameras detected</option>';
-            showToast('No cameras found on this device.', 'error');
+            showToast('No cameras found.', 'error');
         }
     } catch (err) {
-        console.error('Camera enumeration error:', err);
-        cameraSelect.innerHTML = '<option value="">Camera access denied</option>';
-        showToast('Please grant camera access permissions.', 'error');
+        console.error('Camera query error:', err);
+        cameraSelect.innerHTML = '<option value="">Access denied</option>';
+        showToast('Enable camera permissions to scan.', 'error');
     }
 });
 
-cameraSelect.addEventListener('change', () => {
-    // Restart scan if option changes
-    startScanner();
-});
+cameraSelect.addEventListener('change', startScanner);
 
 async function startScanner() {
-    await stopScanner(); // clear current session
-    
+    await stopScanner();
     const cameraId = cameraSelect.value;
     if (!cameraId) return;
     
+    // Narrow down scanning formats to common ones (avoids wasting CPU on exotic formats)
+    let formats = [];
+    if (typeof Html5QrcodeSupportedFormats !== 'undefined') {
+        formats = [
+            Html5QrcodeSupportedFormats.QR_CODE,
+            Html5QrcodeSupportedFormats.UPC_A,
+            Html5QrcodeSupportedFormats.UPC_E,
+            Html5QrcodeSupportedFormats.EAN_13,
+            Html5QrcodeSupportedFormats.EAN_8,
+            Html5QrcodeSupportedFormats.CODE_39,
+            Html5QrcodeSupportedFormats.CODE_93,
+            Html5QrcodeSupportedFormats.CODE_128,
+            Html5QrcodeSupportedFormats.ITF
+        ];
+    }
+
     appState.html5Qrcode = new Html5Qrcode('scanner-viewfinder');
     try {
         await appState.html5Qrcode.start(
             cameraId,
             {
-                fps: 10,
+                fps: 24, // Increase scan rate (frames per second) for faster reaction
                 qrbox: (w, h) => {
-                    // Responsive sizing box
-                    const size = Math.min(w, h) * 0.65;
-                    return { width: size, height: size };
-                }
+                    // Optimized landscape rectangle for long/thin barcodes
+                    const width = Math.min(w * 0.85, 300);
+                    const height = Math.min(h * 0.45, 140);
+                    return { width: width, height: height };
+                },
+                // Request HD camera stream to ensure thin barcode lines are clear
+                videoConstraints: {
+                    deviceId: { exact: cameraId },
+                    width: { min: 640, ideal: 1280 },
+                    height: { min: 480, ideal: 720 }
+                },
+                formatsToSupport: formats
             },
             async (decodedText) => {
-                // Success Scan hook!
-                playBeepSound();
-                showToast(`Scanned Barcode: ${decodedText}`, 'success');
+                playBeep();
+                showToast(`Scanned Code: ${decodedText}`, 'success');
                 
                 await stopScanner();
                 scannerModal.classList.add('hidden');
-                
                 await handleScannedCode(decodedText);
             },
-            () => {
-                // Ignore silent scan line checks
-            }
+            () => { /* Silent error checks */ }
         );
     } catch (err) {
-        console.error('Failed to start scanner view:', err);
-        showToast('Camera error: unable to spin up stream.', 'error');
+        console.error('Scanner start failed:', err);
+        showToast('Unable to open camera stream. Try selecting another camera.', 'error');
     }
 }
 
@@ -519,7 +537,7 @@ async function stopScanner() {
                 await appState.html5Qrcode.stop();
             }
         } catch (e) {
-            console.error('Error stopping scanner:', e);
+            console.error('Scanner stop error:', e);
         }
         appState.html5Qrcode = null;
     }
@@ -530,7 +548,6 @@ btnCloseScanner.addEventListener('click', async () => {
     scannerModal.classList.add('hidden');
 });
 
-// Handle click outside scanner modal card to close
 scannerModal.addEventListener('click', async (e) => {
     if (e.target === scannerModal) {
         await stopScanner();
@@ -547,23 +564,23 @@ async function handleScannedCode(barcode) {
             const record = await res.json();
             selectRecord(record);
         } else if (res.status === 404) {
-            showToast('Barcode not found. Adding new record entry.', 'info');
+            showToast('Code not found. Creating entry.', 'info');
             startNewRecord(barcode);
         } else if (res.status === 401) {
             logout();
         } else {
-            showToast('Error reading barcode registry.', 'error');
+            showToast('Error looking up scanned barcode.', 'error');
         }
     } catch (e) {
-        console.error('Query scanned code failed:', e);
-        showToast('Server connection lost.', 'error');
+        console.error('Lookup failed:', e);
+        showToast('Connection error.', 'error');
     }
 }
 
 /* ==========================================================================
-   WEB AUDIO SOUND EFFECTS
+   WEB AUDIO BEEP SYNTHESIS
    ========================================================================== */
-function playBeepSound() {
+function playBeep() {
     try {
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
         if (!AudioCtx) return;
@@ -576,15 +593,14 @@ function playBeepSound() {
         gainNode.connect(ctx.destination);
         
         oscillator.type = 'sine';
-        oscillator.frequency.setValueAtTime(950, ctx.currentTime); // Pitch A5
-        gainNode.gain.setValueAtTime(0.12, ctx.currentTime);
+        oscillator.frequency.setValueAtTime(1000, ctx.currentTime); // Pitch C6
+        gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
         
         oscillator.start();
-        // Exponential decay
-        gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
-        oscillator.stop(ctx.currentTime + 0.15);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+        oscillator.stop(ctx.currentTime + 0.12);
     } catch (e) {
-        console.warn('Web Audio beep unsupported or blocked:', e);
+        console.warn('AudioContext blocked:', e);
     }
 }
 
@@ -604,5 +620,5 @@ function escapeHTML(str) {
     );
 }
 
-// Initial Boot Run
+// Boot Initialization
 updateView();
