@@ -10,8 +10,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- Main Style -->
     <link rel="stylesheet" href="style.css">
-    <!-- html5-qrcode scanner -->
-    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js" defer></script>
+    <!-- ZXing Barcode Scanner -->
+    <script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js" defer></script>
     <!-- App JavaScript -->
     <script src="dashboard.js" defer></script>
 </head>
@@ -141,7 +141,7 @@
 
             <!-- Viewfinder Area -->
             <div class="viewfinder-container">
-                <div id="scanner-viewfinder"></div>
+                <video id="scanner-viewfinder" autoplay muted playsinline></video>
                 <div class="scanner-overlay">
                     <div class="scanner-laser"></div>
                     <div class="scanner-corners"></div>

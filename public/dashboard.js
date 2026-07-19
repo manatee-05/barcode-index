@@ -7,7 +7,7 @@ let appState = {
     indexName: localStorage.getItem('aeroscan_index_name') || '',
     records: [],
     selectedBarcode: null,
-    html5Qrcode: null
+    codeReader: null
 };
 
 // Redirect if not logged in
@@ -266,18 +266,32 @@ if (btnScan) {
         cameraSelect.innerHTML = '<option value="">Checking camera...</option>';
         
         try {
-            const cameras = await Html5Qrcode.getCameras();
+            if (!appState.codeReader) {
+                appState.codeReader = new ZXing.BrowserMultiFormatReader();
+            }
+            
+            const cameras = await appState.codeReader.listVideoInputDevices();
             cameraSelect.innerHTML = '';
+            
             if (cameras && cameras.length > 0) {
+                let defaultDeviceId = cameras[0].deviceId;
                 cameras.forEach((camera, index) => {
                     const opt = document.createElement('option');
-                    opt.value = camera.id;
+                    opt.value = camera.deviceId;
+                    // Prefer back/environment camera if available
                     if (camera.label.toLowerCase().includes('back') || camera.label.toLowerCase().includes('environment')) {
                         opt.selected = true;
+                        defaultDeviceId = camera.deviceId;
                     }
                     opt.textContent = camera.label || `Camera ${index + 1}`;
                     cameraSelect.appendChild(opt);
                 });
+                
+                // If the user already selected one, keep it; otherwise use default
+                if (!cameraSelect.value) {
+                    cameraSelect.value = defaultDeviceId;
+                }
+                
                 startScanner();
             } else {
                 cameraSelect.innerHTML = '<option value="">No cameras detected</option>';
@@ -298,23 +312,26 @@ async function startScanner() {
     const cameraId = cameraSelect.value;
     if (!cameraId) return;
 
-    appState.html5Qrcode = new Html5Qrcode('scanner-viewfinder');
+    if (!appState.codeReader) {
+        appState.codeReader = new ZXing.BrowserMultiFormatReader();
+    }
+
     try {
-        await appState.html5Qrcode.start(
+        await appState.codeReader.decodeFromVideoDevice(
             cameraId,
-            {
-                fps: 10, // Lower FPS for better stability and decoding time on mobile
-                // Removed qrbox constraint. Full-frame scanning drastically improves read rates.
-            },
-            async (decodedText) => {
-                playBeep();
-                showToast(`Scanned Code: ${decodedText}`, 'success');
-                await stopScanner();
-                scannerModal.classList.add('hidden');
-                await handleScannedCode(decodedText);
-            },
-            (errorMessage) => {
-                // Keep silent to avoid spamming the console on empty frames
+            'scanner-viewfinder',
+            async (result, err) => {
+                if (result) {
+                    playBeep();
+                    showToast(`Scanned Code: ${result.getText()}`, 'success');
+                    await stopScanner();
+                    scannerModal.classList.add('hidden');
+                    await handleScannedCode(result.getText());
+                }
+                if (err && !(err instanceof ZXing.NotFoundException)) {
+                    // Ignore NotFoundException, it just means no barcode in the current frame
+                    console.error("ZXing Error: ", err);
+                }
             }
         );
     } catch (err) {
@@ -325,16 +342,8 @@ async function startScanner() {
 }
 
 async function stopScanner() {
-    if (appState.html5Qrcode) {
-        try {
-            if (appState.html5Qrcode.isScanning) {
-                await appState.html5Qrcode.stop();
-            }
-            appState.html5Qrcode.clear();
-        } catch (e) {
-            console.error('Scanner stop error:', e);
-        }
-        appState.html5Qrcode = null;
+    if (appState.codeReader) {
+        appState.codeReader.reset();
     }
 }
 
