@@ -272,6 +272,11 @@ app.delete('/api/records/:barcode', authenticateToken, async (req, res) => {
     }
 });
 
+// Serve Dashboard explicitly
+app.get('/dashboard', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
+});
+
 // Serve frontend SPA (Fallback for HTML5 routing if needed, but SPA fits inside root)
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
