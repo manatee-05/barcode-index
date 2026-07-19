@@ -7,7 +7,7 @@ let appState = {
     indexName: localStorage.getItem('aeroscan_index_name') || '',
     records: [],
     selectedBarcode: null,
-    codeReader: null
+    isScanning: false
 };
 
 // Redirect if not logged in
@@ -263,13 +263,8 @@ if (btnDeleteRecord) {
 if (btnScan) {
     btnScan.addEventListener('click', async () => {
         scannerModal.classList.remove('hidden');
-        cameraSelect.innerHTML = '<option value="">Checking camera...</option>';
         
         try {
-            if (!appState.codeReader) {
-                appState.codeReader = new ZXing.BrowserMultiFormatReader();
-            }
-            
             // Get devices natively
             let devices = await navigator.mediaDevices.enumerateDevices();
             let videoDevices = devices.filter(d => d.kind === 'videoinput');
@@ -319,103 +314,105 @@ if (btnScan) {
 
 if (cameraSelect) cameraSelect.addEventListener('change', startScanner);
 
-async function startScanner() {
-    await stopScanner();
+function startScanner() {
+    stopScanner(); // Ensure any previous instance is stopped completely
     const cameraId = cameraSelect.value;
     if (!cameraId) return;
 
-    if (!appState.codeReader) {
-        appState.codeReader = new ZXing.BrowserMultiFormatReader();
+    const targetDiv = document.getElementById('scanner-viewfinder');
+    targetDiv.innerHTML = ''; // Clear previous injected elements
+
+    // Force injected elements to fill the square UI correctly
+    targetDiv.style.position = 'relative';
+    
+    // Add a quick dynamic style to ensure Quagga's injected video/canvas elements don't overflow
+    if (!document.getElementById('quagga-styles')) {
+        const style = document.createElement('style');
+        style.id = 'quagga-styles';
+        style.innerHTML = `
+            #scanner-viewfinder video { width: 100%; height: 100%; object-fit: cover; position: absolute; top: 0; left: 0; }
+            #scanner-viewfinder canvas.drawingBuffer { display: none; }
+        `;
+        document.head.appendChild(style);
     }
 
     try {
-        const videoElement = document.getElementById('scanner-viewfinder');
-        
-        let stream;
-        try {
-            stream = await navigator.mediaDevices.getUserMedia({
-                video: { deviceId: { exact: cameraId } }
-            });
-        } catch (e) {
-            console.warn("Strict deviceId failed, falling back to ideal:", e);
-            stream = await navigator.mediaDevices.getUserMedia({
-                video: { deviceId: cameraId }
-            });
-        }
-        
-        videoElement.srcObject = stream;
-        appState.activeStream = stream;
-        appState.isScanning = true;
-        
-        // Ensure video is playing before starting the loop
-        videoElement.addEventListener('playing', () => {
-            scanLoop();
-        }, { once: true });
-
-        // Initialize native BarcodeDetector if supported (blazing fast on Android)
-        const barcodeDetector = ('BarcodeDetector' in window) ? new BarcodeDetector() : null;
-
-        async function scanLoop() {
-            if (!appState.isScanning) return;
-
-            // Wait until the browser has actually populated the video feed's dimensions
-            if (videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
-                
-                // 1. Try Native BarcodeDetector (Chrome/Android)
-                if (barcodeDetector) {
-                    try {
-                        const barcodes = await barcodeDetector.detect(videoElement);
-                        if (barcodes.length > 0) {
-                            onBarcodeFound(barcodes[0].rawValue);
-                            return; // Stop looping
-                        }
-                    } catch (err) {
-                        // Silent fail, continue to ZXing
-                    }
+        Quagga.init({
+            inputStream: {
+                name: "Live",
+                type: "LiveStream",
+                target: targetDiv,
+                constraints: {
+                    width: { ideal: 1280 }, // Higher res makes 1D scanning much more reliable
+                    height: { ideal: 720 },
+                    deviceId: cameraId
                 }
+            },
+            locator: {
+                patchSize: "medium",
+                halfSample: true
+            },
+            numOfWorkers: navigator.hardwareConcurrency ? Math.min(navigator.hardwareConcurrency, 4) : 2,
+            decoder: {
+                // Extremely comprehensive 1D coverage
+                readers: [
+                    "code_128_reader",
+                    "ean_reader",
+                    "ean_8_reader",
+                    "code_39_reader",
+                    "code_39_vin_reader",
+                    "codabar_reader",
+                    "upc_reader",
+                    "upc_e_reader",
+                    "i2of5_reader",
+                    "2of5_reader",
+                    "code_93_reader"
+                ]
+            },
+            locate: true
+        }, function(err) {
+            if (err) {
+                console.error("Quagga Init Error:", err);
+                showToast('Camera access failed. Check browser permissions.', 'error');
+                scannerModal.classList.add('hidden');
+                return;
+            }
+            Quagga.start();
+            appState.isScanning = true;
+        });
 
-                // 2. Try ZXing Fallback (Safari/iOS)
-                try {
-                    const result = await appState.codeReader.decodeFromVideoElement(videoElement);
-                    if (result) {
-                        onBarcodeFound(result.getText());
-                        return; // Stop looping
-                    }
-                } catch (err) {
-                    // Ignore NotFoundException, just keep scanning
-                }
-            }
-            
-            // Loop on a slight delay to prevent mobile CPU overheating
-            if (appState.isScanning) {
-                setTimeout(scanLoop, 150); // ~6-7 scans per second
-            }
-        }
-        
-        async function onBarcodeFound(decodedText) {
-            playBeep();
-            showToast(`Scanned Code: ${decodedText}`, 'success');
-            await stopScanner();
-            scannerModal.classList.add('hidden');
-            await handleScannedCode(decodedText);
-        }
-        
+        // Register the callback
+        Quagga.onDetected(onBarcodeFound);
+
     } catch (err) {
         console.error('Scanner start failed:', err);
-        showToast('Camera access failed. Check browser permissions.', 'error');
+        showToast('Camera initialization failed.', 'error');
         scannerModal.classList.add('hidden');
     }
 }
 
-async function stopScanner() {
-    appState.isScanning = false;
+async function onBarcodeFound(result) {
+    const code = result.codeResult.code;
+    if (!code || !appState.isScanning) return;
     
-    if (appState.codeReader) {
-        appState.codeReader.reset();
-    }
-    if (appState.activeStream) {
-        appState.activeStream.getTracks().forEach(track => track.stop());
-        appState.activeStream = null;
+    // Quagga can sometimes read a frame multiple times in rapid succession
+    appState.isScanning = false; 
+    
+    playBeep();
+    showToast(`Scanned Code: ${code}`, 'success');
+    stopScanner();
+    scannerModal.classList.add('hidden');
+    await handleScannedCode(code);
+}
+
+function stopScanner() {
+    appState.isScanning = false;
+    try {
+        // Quagga has a tendency to throw if stopped before fully started, so we wrap it
+        Quagga.stop();
+        Quagga.offDetected(onBarcodeFound);
+    } catch (e) {
+        console.warn('Error stopping Quagga:', e);
     }
 }
 
