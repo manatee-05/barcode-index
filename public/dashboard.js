@@ -297,33 +297,14 @@ async function startScanner() {
     await stopScanner();
     const cameraId = cameraSelect.value;
     if (!cameraId) return;
-    
-    let formats = [];
-    if (typeof Html5QrcodeSupportedFormats !== 'undefined') {
-        formats = [
-            Html5QrcodeSupportedFormats.QR_CODE,
-            Html5QrcodeSupportedFormats.UPC_A,
-            Html5QrcodeSupportedFormats.UPC_E,
-            Html5QrcodeSupportedFormats.EAN_13,
-            Html5QrcodeSupportedFormats.EAN_8,
-            Html5QrcodeSupportedFormats.CODE_39,
-            Html5QrcodeSupportedFormats.CODE_93,
-            Html5QrcodeSupportedFormats.CODE_128,
-            Html5QrcodeSupportedFormats.ITF
-        ];
-    }
 
     appState.html5Qrcode = new Html5Qrcode('scanner-viewfinder');
     try {
         await appState.html5Qrcode.start(
             cameraId,
             {
-                fps: 24,
-                qrbox: (w, h) => {
-                    return { width: Math.min(w * 0.85, 300), height: Math.min(h * 0.45, 140) };
-                },
-                // Removed strict width/height and exact deviceId constraints to support Mobile Safari
-                formatsToSupport: formats
+                fps: 10, // Lower FPS for better stability and decoding time on mobile
+                // Removed qrbox constraint. Full-frame scanning drastically improves read rates.
             },
             async (decodedText) => {
                 playBeep();
@@ -332,11 +313,14 @@ async function startScanner() {
                 scannerModal.classList.add('hidden');
                 await handleScannedCode(decodedText);
             },
-            () => { }
+            (errorMessage) => {
+                // Keep silent to avoid spamming the console on empty frames
+            }
         );
     } catch (err) {
         console.error('Scanner start failed:', err);
-        showToast('Unable to open camera stream.', 'error');
+        showToast('Camera access failed. Ensure you are using HTTPS and granted permissions.', 'error');
+        scannerModal.classList.add('hidden');
     }
 }
 
@@ -346,6 +330,7 @@ async function stopScanner() {
             if (appState.html5Qrcode.isScanning) {
                 await appState.html5Qrcode.stop();
             }
+            appState.html5Qrcode.clear();
         } catch (e) {
             console.error('Scanner stop error:', e);
         }
