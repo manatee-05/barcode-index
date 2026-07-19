@@ -352,27 +352,52 @@ async function startScanner() {
             scanLoop();
         }, { once: true });
 
+        // Initialize native BarcodeDetector if supported (blazing fast on Android)
+        const barcodeDetector = ('BarcodeDetector' in window) ? new BarcodeDetector() : null;
+
         async function scanLoop() {
             if (!appState.isScanning) return;
 
-            try {
-                const result = await appState.codeReader.decodeFromVideoElement(videoElement);
-                if (result) {
-                    playBeep();
-                    showToast(`Scanned Code: ${result.getText()}`, 'success');
-                    await stopScanner();
-                    scannerModal.classList.add('hidden');
-                    await handleScannedCode(result.getText());
-                    return; // End loop on success
+            // Wait until the browser has actually populated the video feed's dimensions
+            if (videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
+                
+                // 1. Try Native BarcodeDetector (Chrome/Android)
+                if (barcodeDetector) {
+                    try {
+                        const barcodes = await barcodeDetector.detect(videoElement);
+                        if (barcodes.length > 0) {
+                            onBarcodeFound(barcodes[0].rawValue);
+                            return; // Stop looping
+                        }
+                    } catch (err) {
+                        // Silent fail, continue to ZXing
+                    }
                 }
-            } catch (err) {
-                // Ignore NotFoundException, just keep scanning
+
+                // 2. Try ZXing Fallback (Safari/iOS)
+                try {
+                    const result = await appState.codeReader.decodeFromVideoElement(videoElement);
+                    if (result) {
+                        onBarcodeFound(result.getText());
+                        return; // Stop looping
+                    }
+                } catch (err) {
+                    // Ignore NotFoundException, just keep scanning
+                }
             }
             
-            // Loop on the next animation frame
+            // Loop on a slight delay to prevent mobile CPU overheating
             if (appState.isScanning) {
-                requestAnimationFrame(scanLoop);
+                setTimeout(scanLoop, 150); // ~6-7 scans per second
             }
+        }
+        
+        async function onBarcodeFound(decodedText) {
+            playBeep();
+            showToast(`Scanned Code: ${decodedText}`, 'success');
+            await stopScanner();
+            scannerModal.classList.add('hidden');
+            await handleScannedCode(decodedText);
         }
         
     } catch (err) {
