@@ -349,24 +349,19 @@ function startScanner() {
                 }
             },
             locator: {
-                patchSize: "medium",
-                halfSample: true
+                patchSize: "large", // Better for standard 1D codes
+                halfSample: false   // Do NOT downsample; we need the full resolution for fine lines
             },
             numOfWorkers: navigator.hardwareConcurrency ? Math.min(navigator.hardwareConcurrency, 4) : 2,
             decoder: {
-                // Extremely comprehensive 1D coverage
+                // Reduced extremely noisy/rare readers to prevent false-positive partial matches
                 readers: [
                     "code_128_reader",
                     "ean_reader",
-                    "ean_8_reader",
-                    "code_39_reader",
-                    "code_39_vin_reader",
-                    "codabar_reader",
                     "upc_reader",
                     "upc_e_reader",
-                    "i2of5_reader",
-                    "2of5_reader",
-                    "code_93_reader"
+                    "ean_8_reader",
+                    "code_39_reader"
                 ]
             },
             locate: true
@@ -391,12 +386,21 @@ function startScanner() {
     }
 }
 
+let scanHistory = {};
+
 async function onBarcodeFound(result) {
     const code = result.codeResult.code;
     if (!code || !appState.isScanning) return;
     
-    // Quagga can sometimes read a frame multiple times in rapid succession
+    // Multi-frame verification: Require the exact same code to be read twice in a row
+    // This completely eliminates partial reads and false positives
+    scanHistory[code] = (scanHistory[code] || 0) + 1;
+    if (scanHistory[code] < 2) {
+        return; 
+    }
+    
     appState.isScanning = false; 
+    scanHistory = {}; // reset history
     
     playBeep();
     showToast(`Scanned Code: ${code}`, 'success');
@@ -407,8 +411,8 @@ async function onBarcodeFound(result) {
 
 function stopScanner() {
     appState.isScanning = false;
+    scanHistory = {};
     try {
-        // Quagga has a tendency to throw if stopped before fully started, so we wrap it
         Quagga.stop();
         Quagga.offDetected(onBarcodeFound);
     } catch (e) {
